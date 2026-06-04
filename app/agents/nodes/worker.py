@@ -1,19 +1,18 @@
-from langchain_community.chat_models import ChatOllama
 from langchain_core.messages import SystemMessage, HumanMessage
-from app.agents.state import PlanExecuteState
+from app.agents.state import AgentState
 from app.agents.tools.knowledge_retriever import search_knowledge_base
-from app.core.config import settings
+from app.core.llm_factory import LLMFactory
 
 # Worker 包含两个脑区：一个用来选工具 (正常温度)，一个用来提纯保真 (极低温度)
-worker_llm = ChatOllama(model=settings.LLM_MODEL, temperature=0.1).bind_tools([search_knowledge_base])
-summarize_llm = ChatOllama(model=settings.LLM_MODEL, temperature=0.01)
+worker_llm = LLMFactory.get_text_llm(temperature=0.1).bind_tools([search_knowledge_base])
+summarize_llm = LLMFactory.get_text_llm(temperature=0.01)
 
-def worker_node(state: PlanExecuteState):
+def worker_node(state: AgentState):
     """
     【架构解析：执行器模式 (Executor Pattern)】
     负责调用工具获取外界数据，并进行数据清洗 (提纯)。
     """
-    current_task = state["plan"][0]
+    current_task = state["tasks"][0]
     print(f"\n👷 [研究员] 正在执行任务: {current_task}")
     
     messages = [
@@ -45,7 +44,11 @@ def worker_node(state: PlanExecuteState):
         
     print("   -> ✅ 提纯事实已存入全局上下文。")
     
+    # 🚨 手动读取当前状态并追加，而不是依赖 operator.add
+    current_past_steps = state.get("past_steps", [])
+    current_past_steps.append((current_task, result_text))
+
     return {
-        "plan": state["plan"][1:], 
-        "past_steps": [(current_task, result_text)] 
+        "tasks": state["tasks"][1:], 
+        "past_steps": current_past_steps 
     }

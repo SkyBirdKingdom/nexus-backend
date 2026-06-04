@@ -13,6 +13,7 @@ langchain-core
 langchain-community
 langchain-ollama
 langgraph
+langgraph-checkpoint-sqlite
 
 # ==========================================
 # 3. 向量检索与重排底层 (RAG 核心)
@@ -30,3 +31,4 @@ boto3          # 连接 MinIO/S3
 # 5. 多模态文档解析
 # ==========================================
 PyMuPDF          # 即 fitz，最高效的 PDF 处理引擎
+python-multipart

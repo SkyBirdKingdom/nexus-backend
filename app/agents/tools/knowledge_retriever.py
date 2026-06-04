@@ -4,6 +4,7 @@ import json
 from langchain_core.tools import tool
 from sentence_transformers import CrossEncoder
 from app.core.config import settings
+from app.core.database import get_db_connection
 
 # 全局单例重排引擎 (系统启动时加载到内存)
 print("⏳ [系统初始化] 正在加载 Reranker 精度引擎...")
@@ -22,22 +23,14 @@ def search_knowledge_base(query: str) -> str:
         query_vector = ollama.embeddings(model='bge-m3', prompt=query)['embedding']
     except Exception as e:
         return f"向量化失败: {e}"
-
-    # 每次检索建立短连接（或者未来引入 SQLAlchemy 连接池）
-    conn = psycopg2.connect(
-        dbname=settings.POSTGRES_DB,
-        user=settings.POSTGRES_USER,
-        password=settings.POSTGRES_PASSWORD,
-        host=settings.POSTGRES_HOST,
-        port=settings.POSTGRES_PORT
-    )
     
     try:
-        with conn.cursor() as cur:
-            cur.execute("CREATE EXTENSION IF NOT EXISTS vector;")
-            sql = "SELECT content, metadata FROM it_support_kb ORDER BY embedding <=> %s::vector LIMIT 15"
-            cur.execute(sql, (query_vector,))
-            coarse_results = cur.fetchall()
+        with get_db_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("CREATE EXTENSION IF NOT EXISTS vector;")
+                sql = "SELECT content, metadata FROM it_support_kb ORDER BY embedding <=> %s::vector LIMIT 15"
+                cur.execute(sql, (query_vector,))
+                coarse_results = cur.fetchall()
             
             if not coarse_results:
                 return "未检索到相关内容。"
@@ -71,5 +64,3 @@ def search_knowledge_base(query: str) -> str:
             
     except Exception as e:
         return f"检索执行崩溃: {e}"
-    finally:
-        conn.close()

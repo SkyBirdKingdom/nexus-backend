@@ -2,7 +2,9 @@
 import psycopg2
 from pgvector.psycopg2 import register_vector
 from app.core.config import settings
+from contextlib import contextmanager
 
+@contextmanager
 def get_db_connection():
     """
     【架构解析：资源生命周期管理】

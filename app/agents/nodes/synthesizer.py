@@ -1,38 +1,48 @@
-from langchain_community.chat_models import ChatOllama
-from app.agents.state import PlanExecuteState
-from app.core.config import settings
+from app.agents.state import AgentState
+from app.core.llm_factory import LLMFactory
 
 # 在 Node 内部初始化大模型，做到依赖下沉
-llm = ChatOllama(model=settings.LLM_MODEL, temperature=0.1)
+llm = LLMFactory.get_text_llm(temperature=0.1)
 
-def synthesizer_node(state: PlanExecuteState):
+def synthesizer_node(state: AgentState):
     """
     【架构解析：纯函数 (Pure Function) 思想】
     这个函数接收 State，返回一个字典（State 的更新）。
     它不直接修改全局变量，这在分布式计算和状态机设计中极其重要，保证了测试的可重复性。
     """
-    print("\n🧑‍🎨 [主编] 正在强制接管 Markdown 渲染引擎...")
+    print("\n🧑‍🎨 [主编] 正在接管并生成最终报告...")
     
-    facts_context = ""
-    for task, result in state.get("past_steps", []):
-        facts_context += f"【检索线索】: {task}\n【返回情报】: {result}\n\n"
+    past_steps = state.get("past_steps", [])
+    # 🚨 读取记忆库传给主编，让它说话连贯
+    history = state.get("chat_history", [])
+    history_str = "\n".join([f"{msg['role']}: {msg['content']}" for msg in history[-4:]])
+    
+    if not past_steps:
+        prompt = f"【历史记忆】:\n{history_str}\n\n用户对你说：{state['objective']}\n请作为 Nexus AI 助手直接简短回复。禁止伪造技术数据。"
+    else:
+        facts_context = ""
+        for task, result in past_steps:
+            facts_context += f"【检索线索】: {task}\n【返回情报】: {result}\n\n"
+            
+        prompt = f"""
+        你是 Nexus 系统的首席架构师。
+        【历史记忆】:\n{history_str}
         
-    prompt = f"""
-    你是 Nexus 系统的首席多模态架构师。
-    
-    【用户指令】: {state["objective"]}
-    
-    【底层搜集到的情报】:
-    {facts_context}
-    
-    【🚨 最高级别系统指令 - 必须绝对服从 🚨】：
-    1. 你具备直接展示图片的能力！如果情报中包含了类似 `![架构图](http://...)` 的代码，你 **必须** 将其原封不动地复制到回答中。
-    2. 如果用户只是要一张图，直接输出图片 Markdown，禁止生成八股文！
-    """
-    
+        基于以上记忆和以下【底层情报】回答用户的【当前指令】。
+        【当前指令】: {state['objective']}
+        【情报】: \n{facts_context}
+        
+        【🚨 保真死命令】：包含 `![...](http://...)` 的图片代码必须原封不动输出！
+        """
+        
     response = llm.invoke(prompt)
-    
-    # 按照约定，我们将最终报告直接放入字典返回
-    # 注意：在真实的 LangGraph 中，通常会在 State 里加一个 `final_response: str` 字段
-    # 这里为了兼容我们之前的流式推送，我们将最终结果直接作为返回。
-    return {"final_response": response.content}
+
+    # 🚨 核心逻辑：更新记忆库
+    new_history = history.copy()
+    new_history.append({"role": "user", "content": state["objective"]})
+    new_history.append({"role": "ai", "content": response.content})
+
+    return {
+        "final_response": response.content,
+        "chat_history": new_history # 将更新后的记忆还给 LangGraph 保存
+    }

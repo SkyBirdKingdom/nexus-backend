@@ -1,5 +1,5 @@
 # Qwen2.5-32B 和 Qwen2.5-VL 统一实例化工厂
-from langchain_community.chat_models import ChatOllama
+from langchain_ollama import ChatOllama
 from app.core.config import settings
 
 class LLMFactory:

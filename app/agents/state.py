@@ -1,23 +1,13 @@
-# 图网络状态定义 (PlanExecuteState)
-import operator
-from typing import Annotated, List, Tuple
+from typing import List, Tuple
 from typing_extensions import TypedDict
-from pydantic import BaseModel, Field
 
-class PlanExecuteState(TypedDict):
+class AgentState(TypedDict):
     """
-    【架构解析：全局状态契约 (Global State Contract)】
-    这是 LangGraph 的血液。每一个 Node 收到这个 State，处理后返回更新的片段。
-    面试时可以提：我们通过 TypedDict 明确了状态结构，避免了 Python 字典滥用导致的 KeyError。
+    【V5.0 记忆强化版状态契约】
     """
-    objective: str # 用户最初的指令
-    plan: List[str] # 待办任务清单
-    
-    # Annotated[..., operator.add] 极其关键！
-    # 它告诉 LangGraph：当 Node 返回 past_steps 时，不要覆盖旧数据，而是追加 (Append) 进去。
-    # 这就是 Redux/Vuex 中常说的 "Reducer" 思想。
-    past_steps: Annotated[List[Tuple[str, str]], operator.add] 
-
-class Plan(BaseModel):
-    """用于强制大模型输出 JSON 结构的 Pydantic 模型"""
-    steps: List[str] = Field(description="The sequentially ordered steps to complete the objective.")
+    objective: str                        # 当前轮次的用户指令
+    chat_history: List[dict]              # 【新增】长程上下文记忆 (存放历次对话)
+    past_steps: List[Tuple[str, str]]     # 当前轮次的检索事实 (去掉了 operator.add，改为覆盖更新)
+    tasks: List[str]                      # 当前轮次的待办任务
+    next_node: str                        # 路由方向盘
+    final_response: str                   # 最终输出内容
