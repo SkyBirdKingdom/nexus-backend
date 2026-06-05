@@ -9,4 +9,4 @@ if __name__ == "__main__":
     reload=True 意味着你在开发时修改任何 Python 代码，服务器都会热更新，无需手动重启。
     """
     print("🚀 正在启动 Nexus 智能体集群...")
-    uvicorn.run("app.api.server:app", host="0.0.0.0", port=8000, reload=True)
+    uvicorn.run("app.api.server:app", host="0.0.0.0", port=8000, reload=False)
