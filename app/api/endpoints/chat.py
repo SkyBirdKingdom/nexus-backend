@@ -54,6 +54,19 @@ async def agent_stream_generator(request: ChatRequest):
                         past_steps = node_state.get("past_steps", [])
                         if past_steps:
                             yield format_sse("working", task_name=past_steps[-1][0], fact=past_steps[-1][1])
+
+                            # 🚀 发给前端的溯源弹窗：使用未翻译、未篡改的纯原生 Chunk (下标 2)！
+                            sources_payload = []
+                            for i, step in enumerate(past_steps):
+                                meta_dict = step[2] if isinstance(step[2], dict) else {"content": step[1]}
+                                sources_payload.append({
+                                    "id": str(i+1), 
+                                    "title": step[0], 
+                                    "chunk": meta_dict.get("content", step[1]),
+                                    "rerank_score": meta_dict.get("rerank_score"),
+                                    "rrf_score": meta_dict.get("rrf_score")
+                                })
+                            yield format_sse("sources", data=sources_payload)
                             
     yield "data: [DONE]\n\n"
 

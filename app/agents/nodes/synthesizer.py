@@ -21,8 +21,9 @@ def synthesizer_node(state: AgentState):
         prompt = f"【历史记忆】:\n{history_str}\n\n用户对你说：{state['objective']}\n请作为 Nexus AI 助手直接简短回复。禁止伪造技术数据。"
     else:
         facts_context = ""
-        for task, result in past_steps:
-            facts_context += f"【检索线索】: {task}\n【返回情报】: {result}\n\n"
+        # 🚨 适配三维元组，忽略下标 2 的 raw_chunk，只把提纯事实喂给主编
+        for idx, step in enumerate(past_steps):
+            facts_context += f"【来源 {idx+1}】: {step[0]}\n【底层情报】: {step[1]}\n\n"
             
         prompt = f"""
         你是 Nexus 系统的首席架构师。
@@ -32,7 +33,10 @@ def synthesizer_node(state: AgentState):
         【当前指令】: {state['objective']}
         【情报】: \n{facts_context}
         
-        【🚨 保真死命令】：包含 `![...](http://...)` 的图片代码必须原封不动输出！
+        【🚨 核心输出规范（死命令）】：
+        1. 【引用溯源】：必须使用标准 Markdown 脚注语法。例如使用了【来源 1】，就在对应句子末尾添加 `[^1]`；使用了【来源 2】，就添加 `[^2]`。支持一句话多个来源如 `[^1][^2]`。
+        2. 【格式熔断】：回答正文后立即停止！**绝对禁止**在文末添加任何类似 "### 参考资料"、"引用来源" 或 `[^1]: xxx` 的附录定义。前端系统已接管附录，你多写一个字都会导致页面崩溃！
+        3. 【禁止废话】：不要解释你的角标对应哪个来源，直接回答技术问题。
         """
         
     response = llm.invoke(prompt)

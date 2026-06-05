@@ -85,23 +85,28 @@ def search_knowledge_base(query: str) -> str:
             highest_score = scored_results[0][0]
             
             if highest_score < CONFIDENCE_THRESHOLD:
-                return "【系统指令】：私有知识库中绝对没有关于此问题的信息，请诚实拒绝。"
+                return json.dumps([{"title": "系统拦截", "content": "知识库中绝对没有关于此问题的信息，请诚实拒绝。"}], ensure_ascii=False)
                 
             top_3_results = [res for res in scored_results[:3] if res[0] >= CONFIDENCE_THRESHOLD]
             
-            # 4. 组装终极情报
-            report_lines = [f"基于高精度混合检索，找到以下与 '{query}' 最相关的绝密依据：\n"]
+            # 4. 🚨 核心改造：组装为独立的 JSON 数组，替代原来的字符串拼接
+            results = []
             for rank, (rerank_score, row) in enumerate(top_3_results):
                 content, metadata, rrf_score = row
                 meta_dict = metadata if isinstance(metadata, dict) else json.loads(metadata)
                 
                 source = meta_dict.get('source', '未知文档')
                 page = meta_dict.get('page', 'N/A')
-                # 打印出分值，让你直观感受算法的威力
-                report_lines.append(f"### [依据 {rank+1}] (Rerank打分: {rerank_score:.2f} | RRF底层得分: {rrf_score:.3f}) 来源: {source} 第{page}页")
-                report_lines.append(f"内容片段: {content}\n")
                 
-            return "\n".join(report_lines)
+                results.append({
+                    "title": f"{source} (第{page}页)",
+                    "content": content,
+                    "rerank_score": round(float(rerank_score), 3),
+                    "rrf_score": round(float(rrf_score), 3)
+                })
+                
+            # 将数组转为 JSON 字符串交还给 Agent
+            return json.dumps(results, ensure_ascii=False)
             
     except Exception as e:
         return f"检索执行崩溃: {e}"
