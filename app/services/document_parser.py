@@ -1,13 +1,14 @@
-# PDF 截取、VLM 打标、入库的核心逻辑
 import fitz
 import json
 import uuid
 import base64
 import ollama
+import os
 from app.core.config import settings
 from app.core.database import get_db_connection
 from app.core.storage import storage
-import os
+# 🚨 新增：引入 LangChain 的高级递归分块器
+from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 def merge_rects(rect_list, margin=15):
     """
@@ -16,7 +17,6 @@ def merge_rects(rect_list, margin=15):
     """
     if not rect_list:
         return []
-        
     merged = True
     while merged:
         merged = False
@@ -25,10 +25,9 @@ def merge_rects(rect_list, margin=15):
             r = rect_list.pop(0)
             is_intersect = False
             for i, other in enumerate(new_rects):
-                # 稍微扩大一点判定范围，防止靠得近但没相交的元素被切开
                 expanded_other = other + (-margin, -margin, margin, margin)
                 if r.intersects(expanded_other):
-                    new_rects[i] = r | other  # 取并集 (Union)
+                    new_rects[i] = r | other
                     is_intersect = True
                     merged = True
                     break
@@ -39,39 +38,64 @@ def merge_rects(rect_list, margin=15):
 
 def process_and_ingest_document(file_path: str, filename: str):
     """
-    【架构解析：胖服务层 (Fat Service)】
-    封装最高复杂度的多模态入库流水线。自带页级微事务与自动内存释放。
+    【架构解析：V5.0 高级入库流水线】
+    阶段 1：使用递归滑动窗口进行文本切块 (Chunking & Overlap)
+    阶段 2：逐页扫描视觉元素，使用 VLM 多模态解析架构图
     """
-    print(f"\n⚙️ [业务层] 启动 VLM 多模态解析流水线: {filename}")
+    print(f"\n⚙️ [业务层] 启动高级 RAG 解析流水线: {filename}")
     
-    # 最外层异常捕获：保证系统不会因为某一个坏文件而崩溃
     try:
-        # 使用 with 上下文管理器，确保 PDF 解析完后自动释放内存
         with fitz.open(file_path) as doc:
             with get_db_connection() as conn:
                 with conn.cursor() as cur:
+                    
+                    # ==========================================
+                    # 🚀 阶段 1: 高级纯文本处理 (滑动窗口语义切分)
+                    # ==========================================
+                    print("📄 [1/2] 正在提取全篇文本并进行高级语义切分...")
+                    
+                    # 1. 实例化切分器：每次切 500 字，首尾重叠 100 字
+                    text_splitter = RecursiveCharacterTextSplitter(
+                        chunk_size=500,     
+                        chunk_overlap=100,  
+                        # 优先按段落切，切不动再按句号，再切不动按逗号
+                        separators=["\n\n", "\n", "。", "！", "？", "，", " ", ""] 
+                    )
+                    
+                    # 2. 收集整本书的文本和对应的页码元数据
+                    texts = []
+                    metadatas = []
+                    for page_num in range(len(doc)):
+                        page_text = doc.load_page(page_num).get_text()
+                        if len(page_text.strip()) > 50:
+                            texts.append(page_text)
+                            metadatas.append({"source": filename, "page": page_num + 1, "type": "text"})
+                            
+                    # 3. 核心魔法：切分时，LangChain 会自动把元数据映射到每一块小切片上！
+                    if texts:
+                        chunks = text_splitter.create_documents(texts, metadatas=metadatas)
+                        print(f"✂️ 全文共被切分为 {len(chunks)} 个高质量语义区块。正在向量化入库...")
+                        
+                        for chunk in chunks:
+                            # 为每个 500 字的切片生成高精度向量
+                            vec = ollama.embeddings(model='bge-m3', prompt=chunk.page_content)['embedding']
+                            cur.execute(
+                                "INSERT INTO it_support_kb (content, metadata, embedding) VALUES (%s, %s, %s)",
+                                (chunk.page_content, json.dumps(chunk.metadata), vec)
+                            )
+                        conn.commit() # 提交文本事务
+
+                    # ==========================================
+                    # 👁️ 阶段 2: 视觉元素扫描与 VLM 降噪打标
+                    # ==========================================
+                    print("👁️ [2/2] 正在启动多模态视觉神经元...")
                     for page_num in range(len(doc)):
                         print(f"📄 正在处理第 {page_num + 1}/{len(doc)} 页...")
                         page = doc.load_page(page_num)
                         page_rect = page.rect
                         
-                        # 页级微事务异常捕获：某一页报错，只回滚当前页
                         try:
-                            # ==========================================
-                            # 1. 文本处理
-                            # ==========================================
-                            text_content = page.get_text()
-                            if len(text_content.strip()) > 50:
-                                vec = ollama.embeddings(model='bge-m3', prompt=text_content)['embedding']
-                                metadata = {"source": filename, "page": page_num + 1, "type": "text"}
-                                cur.execute(
-                                    "INSERT INTO it_support_kb (content, metadata, embedding) VALUES (%s, %s, %s)",
-                                    (text_content, json.dumps(metadata), vec)
-                                )
-                            
-                            # ==========================================
-                            # 2. 视觉元素扫描与降噪
-                            # ==========================================
+                            # (这部分代码与你原先的图片处理逻辑完全一致)
                             raw_rects = []
                             for img_info in page.get_image_info(): raw_rects.append(fitz.Rect(img_info["bbox"]))
                             for path in page.get_drawings(): raw_rects.append(path["rect"])
@@ -87,9 +111,6 @@ def process_and_ingest_document(file_path: str, filename: str):
                                 rect = rect.intersect(page_rect) 
                                 valid_charts.append(rect)
 
-                            # ==========================================
-                            # 3. 传 MinIO 与 VLM 打标
-                            # ==========================================
                             for idx, chart_rect in enumerate(valid_charts):
                                 pix = page.get_pixmap(matrix=fitz.Matrix(300 / 72, 300 / 72), clip=chart_rect, alpha=False)
                                 image_bytes = pix.tobytes("png")
@@ -123,13 +144,10 @@ def process_and_ingest_document(file_path: str, filename: str):
                                     "INSERT INTO it_support_kb (content, metadata, embedding) VALUES (%s, %s, %s)",
                                     (rich_content, json.dumps(meta), img_vec)
                                 )
-                            
-                            # 当前页解析全部成功，提交微事务
                             conn.commit()
-                            
                         except Exception as page_e:
-                            print(f"   ⚠️ 第 {page_num + 1} 页处理异常，已回滚该页操作: {page_e}")
-                            conn.rollback() # 单页失败不影响其他页
+                            print(f"   ⚠️ 第 {page_num + 1} 页图片处理异常，已回滚该页操作: {page_e}")
+                            conn.rollback()
                             
         print(f"✅ 文件 {filename} 知识库入库彻底完成！")
         
@@ -137,7 +155,6 @@ def process_and_ingest_document(file_path: str, filename: str):
         print(f"❌ 解析流水线遭遇致命错误: {main_e}")
         
     finally:
-        # 【架构级优化】：解析完成后，自动清理 FastAPI 下载到硬盘的临时文件，防止磁盘写满
         if os.path.exists(file_path):
             os.remove(file_path)
             print(f"🗑️ 已安全清理本地临时文件: {file_path}")
