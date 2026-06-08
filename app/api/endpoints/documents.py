@@ -18,8 +18,9 @@ async def upload_document(background_tasks: BackgroundTasks, file: UploadFile = 
     2. 将漫长的多模态解析任务（process_and_ingest_document）挂载到 FastAPI 的后台任务池。
     3. 立刻切断 HTTP 连接，响应前端，绝不阻塞！
     """
-    if not file.filename.lower().endswith('.pdf'):
-        raise HTTPException(status_code=400, detail="目前仅支持 PDF 格式文档的高精度解析")
+    allowed_extensions = ('.pdf', '.docx', '.xlsx', '.pptx', '.md', '.csv', '.html')
+    if not file.filename.lower().endswith(allowed_extensions):
+        raise HTTPException(status_code=400, detail=f"不支持的格式。目前支持: {allowed_extensions}")
         
     file_path = os.path.join(UPLOAD_DIR, file.filename)
     

@@ -4,11 +4,18 @@ import uuid
 import base64
 import ollama
 import os
+from collections import deque
+from markitdown import MarkItDown
 from app.core.config import settings
 from app.core.database import get_db_connection
 from app.core.storage import storage
 # 🚨 新增：引入 LangChain 的高级递归分块器
 from langchain_text_splitters import RecursiveCharacterTextSplitter
+from langchain_core.documents import Document
+
+# 🚨 新增：引入 Unstructured
+from unstructured.partition.auto import partition
+from unstructured.cleaners.core import clean_extra_whitespace
 
 def merge_rects(rect_list, margin=15):
     """
@@ -36,7 +43,7 @@ def merge_rects(rect_list, margin=15):
         rect_list = new_rects
     return rect_list
 
-def process_and_ingest_document(file_path: str, filename: str):
+def process_pdf_with_vlm(file_path: str, filename: str):
     """
     【架构解析：V5.0 高级入库流水线】
     阶段 1：使用递归滑动窗口进行文本切块 (Chunking & Overlap)
@@ -158,3 +165,155 @@ def process_and_ingest_document(file_path: str, filename: str):
         if os.path.exists(file_path):
             os.remove(file_path)
             print(f"🗑️ 已安全清理本地临时文件: {file_path}")
+
+# 🚨 2. 新增：Unstructured 工业级通用流水线
+def process_unstructured_pipeline(file_path: str, filename: str):
+    print(f"\n🏭 [业务层] 启动 Unstructured 多模态流水线: {filename}")
+    
+    img_temp_dir = f"temp_uploads/images_{uuid.uuid4().hex[:8]}"
+    os.makedirs(img_temp_dir, exist_ok=True)
+    
+    try:
+        elements = partition(
+            filename=file_path, 
+            strategy="hi_res",
+            extract_image_block_types=["Image", "Table"],
+            extract_image_block_output_dir=img_temp_dir
+        )
+        
+        final_chunks = []
+        current_text_buffer = ""
+        
+        # 🚨 核心修复 1：定义容量为 3 的滑动窗口，永远只记忆最近的 3 段有效文本
+        context_window = deque(maxlen=3)
+        last_page_num = "1"
+        
+        text_splitter = RecursiveCharacterTextSplitter(
+            chunk_size=600,     
+            chunk_overlap=150,  
+            separators=["\n## ", "\n### ", "\n\n", "\n", "。", " "]
+        )
+
+        # 闭包函数：将累积的纯文本切块并安全透传页码
+        def flush_text_buffer(page):
+            nonlocal current_text_buffer, final_chunks
+            if current_text_buffer.strip():
+                texts = text_splitter.create_documents(
+                    [current_text_buffer], 
+                    metadatas=[{"source": filename, "type": "unstructured_text", "page": page}]
+                )
+                final_chunks.extend(texts)
+                current_text_buffer = ""
+
+        for element in elements:
+            # 🚨 核心修复 2：准确提取 Unstructured 识别到的原生页码
+            page_num = getattr(element.metadata, "page_number", last_page_num)
+            last_page_num = page_num # 更新缓存
+            
+            if element.category == "Table":
+                flush_text_buffer(page_num)
+                html_table = getattr(element.metadata, "text_as_html", element.text)
+
+                # 提取 Unstructured 原生提供的无标签纯文本，用于无损搜索
+                clean_table_text = clean_extra_whitespace(element.text)
+                context_str = " ".join(context_window) if context_window else "文档正文"
+                
+                # 🚨 1. 搜索面：干净清爽，没有一个 HTML 标签，保证 pg_trgm 和 bge-m3 打分爆表！
+                searchable_text = f"【表格关联上下文：{context_str}】\n表格内数据摘要：{clean_table_text}"
+                
+                # 🚨 2. 展示面：原汁原味的 HTML 表格，隐藏起来
+                display_html = f"【表格关联上下文：{context_str}】\n<div class='table-wrapper'>\n{html_table}\n</div>\n"
+                
+                final_chunks.append(Document(
+                    page_content=searchable_text, # 存入 content 字段，专供检索
+                    metadata={
+                        "source": filename,
+                        "type": "unstructured_table",
+                        "page": page_num,
+                        "original_html": display_html # 悄悄塞进 metadata
+                    }
+                ))
+                
+            elif element.category == "Image":
+                flush_text_buffer(page_num)
+                img_path = getattr(element.metadata, "image_path", None)
+                if img_path and os.path.exists(img_path):
+                    with open(img_path, "rb") as f:
+                        image_bytes = f.read()
+                    
+                    object_key = f"knowledge_images/{filename}_unstructured_{uuid.uuid4().hex[:8]}.png"
+                    storage.client.put_object(
+                        Bucket=settings.S3_BUCKET_NAME, Key=object_key, Body=image_bytes, ContentType='image/png'
+                    )
+                    cloud_url = f"{settings.MINIO_ENDPOINT}/{settings.S3_BUCKET_NAME}/{object_key}"
+                    
+                    base64_image = base64.b64encode(image_bytes).decode('utf-8')
+                    # 🚨 核心修复 3：同样将滑动窗口里的文本喂给 Qwen-VL，让它看图时有语境！
+                    context_str = " ".join(context_window) if context_window else "文档正文"
+                    try:
+                        vlm_response = ollama.chat(
+                            model=settings.VLM_MODEL, 
+                            messages=[{'role': 'user', 'content': f'结合上下文【{context_str}】，详细描述这张插图的核心数据。', 'images': [base64_image]}]
+                        )
+                        desc = vlm_response['message']['content'].strip()
+                    except:
+                        desc = "图表深度解析失败"
+                    
+                    img_md = f"【插图关联上下文：{context_str}】\n![【多模态视觉情报】{desc}]({cloud_url})\n"
+                    final_chunks.append(Document(
+                        page_content=img_md, 
+                        metadata={"source": filename, "type": "unstructured_image", "url": cloud_url, "page": page_num}
+                    ))
+                    
+            else:
+                text = clean_extra_whitespace(element.text)
+                if text:
+                    # 🚨 核心修复 4：只要是有效的文本，就推进滑动窗口里留作记忆
+                    context_window.append(text)
+                    
+                    # 原有的文本拼接逻辑保持不变
+                    if element.category == "Title":
+                        current_text_buffer += f"\n# {text}\n"
+                    else:
+                        current_text_buffer += text + "\n"
+                    
+        # 遍历结束后，清空最后一批文本
+        flush_text_buffer(last_page_num)
+        
+        print(f"✂️ 文件被智能切分为 {len(final_chunks)} 个防破损区块。正在向量化入库...")
+        
+        with get_db_connection() as conn:
+            with conn.cursor() as cur:
+                for chunk in final_chunks:
+                    vec = ollama.embeddings(model='bge-m3', prompt=chunk.page_content)['embedding']
+                    cur.execute(
+                        "INSERT INTO it_support_kb (content, metadata, embedding) VALUES (%s, %s, %s)",
+                        (chunk.page_content, json.dumps(chunk.metadata), vec)
+                    )
+            conn.commit()
+        
+        print(f"✅ 文件 {filename} Unstructured 入库彻底完成！共 {len(final_chunks)} 个区块。")
+    except Exception as e:
+        print(f"❌ Unstructured 流水线遭遇错误: {e}")
+        
+    finally:
+        if os.path.exists(file_path):
+            os.remove(file_path)
+        import shutil
+        if os.path.exists(img_temp_dir):
+            shutil.rmtree(img_temp_dir)
+
+# 🚨 3. 新增：全局调度器入口 (被 endpoints 调用)
+def process_and_ingest_document(file_path: str, filename: str):
+    """
+    【架构解析：调度器模式 (Dispatcher Pattern)】
+    统一的入口点。根据文件扩展名动态分发到不同的解析引擎。
+    未来引入多租户权限时，可以在这里进行拦截和配额校验。
+    """
+    ext = filename.lower()
+    if ext.endswith('.pdf'):
+        # PDF 依然走拥有极致多模态理解能力的旧流水线
+        process_pdf_with_vlm(file_path, filename)
+    else:
+        # 其他办公格式 (Word, Excel, PPT) 走工业级 Unstructured 流水线
+        process_unstructured_pipeline(file_path, filename)

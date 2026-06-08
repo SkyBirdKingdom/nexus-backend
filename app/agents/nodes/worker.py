@@ -13,7 +13,10 @@ def worker_node(state: AgentState):
     【架构解析：执行器模式 (Executor Pattern)】
     负责调用工具获取外界数据，并进行数据清洗 (提纯)。
     """
-    current_task = state["tasks"][0]
+    tasks = state.get("tasks", [])
+
+    # 防御性装甲：如果任务数组还是空了，用用户的原话兜底
+    current_task = tasks[0] if len(tasks) > 0 else state.get("objective", "全局检索")
     print(f"\n👷 [研究员] 正在执行任务: {current_task}")
     
     messages = [
@@ -32,6 +35,9 @@ def worker_node(state: AgentState):
     ]
     
     response = worker_llm.invoke(messages)
+
+    # 安全切片：防止切片报错
+    remaining_tasks = tasks[1:] if len(tasks) > 0 else []
     
     if hasattr(response, 'tool_calls') and response.tool_calls:
         current_past_steps = state.get("past_steps", [])
@@ -53,7 +59,7 @@ def worker_node(state: AgentState):
                     current_past_steps.append((current_task, tool_result_str, tool_result_str))
         print("   -> ✅ 原生情报已全部打散并存入全局上下文。")
         return {
-            "tasks": state["tasks"][1:], 
+            "tasks": remaining_tasks, 
             "past_steps": current_past_steps 
         }
     else:
@@ -61,7 +67,7 @@ def worker_node(state: AgentState):
         current_past_steps = state.get("past_steps", [])
         current_past_steps.append((current_task, response.content, response.content))
         return {
-            "tasks": state["tasks"][1:], 
+            "tasks": remaining_tasks, 
             "past_steps": current_past_steps 
         }
         

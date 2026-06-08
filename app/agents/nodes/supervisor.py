@@ -11,7 +11,7 @@ class RouteDecision(BaseModel):
     """【路由契约】：强制大模型必须输出这三个字段，且 next_node 只能二选一"""
     reasoning: str = Field(description="判断用户意图并做出路由决定的思考过程")
     next_node: Literal["worker", "synthesizer"] = Field(description="下一步要调用的节点。需要查知识库选 worker，闲聊或直接回答选 synthesizer。")
-    tasks: List[str] = Field(default=[], description="如果分配给 worker，请列出具体的检索任务清单；否则为空。")
+    tasks: List[str] = Field(description="【必填】如果 next_node 是 'worker'，必须在这里列出至少 1 个具体的检索词（如：['项目', '明细']）；如果选 synthesizer，请输出空数组 []。")
 
 def supervisor_node(state: AgentState):
     """
@@ -38,14 +38,14 @@ def supervisor_node(state: AgentState):
         {history_str}
         
         【路由规则 - 绝对服从】：
-        1. 意图短路 (闲聊模式)：仅当用户进行纯粹的社交寒暄（如“你好”、“谢谢”、“你是谁”）、或者明显的情绪表达时，才能将 next_node 设为 "synthesizer"。
-        2. 深度检索 (专业模式)：只要遇到以下情况，必须将 next_node 设为 "worker"，并提取精准的检索词：
-           - 包含具体的产品名、架构名、技术术语（如：微服务, Serverless）
-           - 包含任何编号、缩写、代码、项目代号（如：COST02-BP03, ASDF-998）
-           - 询问具体的数据、操作步骤、对比分析
-           
-        【🚨 架构师死命令（宁错杀，不放过）】：
-        大模型禁止自作聪明！如果你遇到不懂的词，或者【即使你懂，但它像是一个专业术语】，你必须路由给 "worker" 查阅私有知识库！绝对不允许直接使用你的内置知识回答业务问题！
+        1. 意图短路 (闲聊模式)：仅当用户进行纯粹的社交寒暄时，才能将 next_node 设为 "synthesizer"。
+        2. 深度检索 (专业模式)：只要询问技术、产品、数据、操作步骤等，必须设为 "worker"。
+        
+        【🚨 核心任务：独立查询词重写 (Query Rewriting)】：
+        如果决定路由给 "worker"，你在提取 `tasks` 时，**绝对不能使用代词（如“它”、“这个”、“相关”）或省略主语**！
+        你必须结合【最近的对话记忆】，将检索词补全为完全独立的、包含特定主语的查询词。
+        - 错误示范：用户问“有相关的架构图吗”，你输出 ["架构图"]
+        - 正确示范：你识别到上文在聊 Serverless，你必须输出 ["Serverless 性能效率 架构图"]
         """),
         ("user", "【当前新指令】: {objective}")
     ])

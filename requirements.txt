@@ -32,3 +32,11 @@ boto3          # 连接 MinIO/S3
 # ==========================================
 PyMuPDF          # 即 fitz，最高效的 PDF 处理引擎
 python-multipart
+markitdown
+
+# ==========================================
+# 6. Unstructured 通用文档解析
+# ==========================================
+unstructured[all-docs]
+unstructured-inference
+layoutparser
