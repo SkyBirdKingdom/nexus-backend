@@ -5,6 +5,7 @@ from langchain_core.tools import tool
 from sentence_transformers import CrossEncoder
 from app.core.config import settings
 from app.core.database import get_db_connection
+from langchain_core.runnables import RunnableConfig
 
 # 全局单例重排引擎 (系统启动时加载到内存)
 print("⏳ [系统初始化] 正在加载 Reranker 精度引擎...")
@@ -12,13 +13,15 @@ reranker = CrossEncoder('BAAI/bge-reranker-v2-m3', max_length=2048)
 print("✅ Reranker 引擎点火完毕！")
 
 @tool
-def search_knowledge_base(query: str) -> str:
+def search_knowledge_base(query: str, config: RunnableConfig) -> str:
     """
     【架构解析：V5.0 混合检索】
     执行 Vector(语义) + Trigram(字面) 双路召回，通过 RRF 算法融合后，再交由 CrossEncoder 精排。
     """
     print(f"\n   [引擎轰鸣] 正在执行双路混合检索: '{query}'")
-    
+    user_id = config["configurable"].get("user_id")
+    if not user_id:
+        return "权限错误：未找到用户上下文。"
     # 1. 生成查询向量
     try:
         query_vector = ollama.embeddings(model='bge-m3', prompt=query)['embedding']
@@ -41,6 +44,7 @@ def search_knowledge_base(query: str) -> str:
                     SELECT content, metadata,
                            ROW_NUMBER() OVER (ORDER BY embedding <=> %s::vector) AS rank
                     FROM it_support_kb
+                    WHERE user_id = %s
                     LIMIT 30
                 ),
                 keyword_search AS (
@@ -48,7 +52,7 @@ def search_knowledge_base(query: str) -> str:
                     SELECT content, metadata,
                            ROW_NUMBER() OVER (ORDER BY similarity(content, %s) DESC) AS rank
                     FROM it_support_kb
-                    WHERE content ILIKE %s OR similarity(content, %s) > 0.05
+                    WHERE user_id = %s AND (content ILIKE %s OR similarity(content, %s) > 0.05)
                     LIMIT 30
                 )
                 -- RRF 融合计算 (常数 k 通常取 60)
@@ -65,7 +69,7 @@ def search_knowledge_base(query: str) -> str:
                 # ILIKE 用于绝对字面包含，similarity 用于近似拼写
                 like_query = f"%{query}%"
                 # 传入四次参数，分别对应 SQL 中的四个 %s
-                cur.execute(sql, (query_vector, query, like_query, query))
+                cur.execute(sql, (query_vector, user_id, query, user_id, like_query, query))
                 coarse_results = cur.fetchall()
             
             if not coarse_results:

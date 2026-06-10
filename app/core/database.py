@@ -30,3 +30,37 @@ def get_db_connection():
     finally:
         if conn is not None:
             conn.close()
+
+def init_db():
+    """
+    【架构解析：启动断言】
+    服务器启动时，强制建表并检查核心字段，防止业务运行到一半才报 SQL 错误。
+    """
+    print("⏳ [数据库] 正在校验表结构...")
+    with get_db_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute("CREATE EXTENSION IF NOT EXISTS vector;")
+            cur.execute("CREATE EXTENSION IF NOT EXISTS pg_trgm;")
+            
+            # 创建用户表
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS users (
+                    id VARCHAR(50) PRIMARY KEY,
+                    username VARCHAR(50) UNIQUE NOT NULL,
+                    hashed_password VARCHAR(100) NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            
+            # 创建带有 user_id 强隔离的知识库表
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS it_support_kb (
+                    id SERIAL PRIMARY KEY,
+                    content TEXT,
+                    metadata JSONB,
+                    embedding vector(1024),
+                    user_id VARCHAR(50) NOT NULL  -- 🚨 核心隔离字段
+                )
+            """)
+        conn.commit()
+    print("✅ [数据库] 引擎校验完毕！")

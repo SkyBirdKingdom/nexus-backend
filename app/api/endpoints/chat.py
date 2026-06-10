@@ -7,17 +7,21 @@ from app.agents.graph import workflow
 from app.utils.sse_formatter import format_sse
 # 🚨 引入官方推荐的异步持久化引擎
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
+from app.core.security import get_current_user
+from fastapi import Depends
 
 # 创建独立的路由组
 router = APIRouter()
 
-async def agent_stream_generator(request: ChatRequest):
-    config = {"configurable": {"thread_id": request.thread_id}}
+async def agent_stream_generator(request: ChatRequest, current_user: dict):
+    safe_thread_id = f"{current_user['user_id']}:{request.thread_id}"
+    config = {"configurable": {"thread_id": safe_thread_id}}
     # 🚨 核心重构：回合制状态初始化
     # 只传入新指令并清空工作台，但【不传入】chat_history，
     # 这样 LangGraph 会自动从 SQLite 中读取保留的 chat_history！
     inputs = {
         "objective": request.message,
+        "user_id": current_user["user_id"],
         "past_steps": [], 
         "tasks": [],      
         "next_node": ""
@@ -71,8 +75,8 @@ async def agent_stream_generator(request: ChatRequest):
     yield "data: [DONE]\n\n"
 
 @router.post("/chat")
-async def chat_stream(request: ChatRequest):
+async def chat_stream(request: ChatRequest, current_user: dict = Depends(get_current_user)):
     return StreamingResponse(
-        agent_stream_generator(request),
+        agent_stream_generator(request, current_user),
         media_type="text/event-stream"
     )

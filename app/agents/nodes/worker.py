@@ -47,7 +47,8 @@ def worker_node(state: AgentState):
         for tool_call in response.tool_calls:
             if tool_call["name"] == "search_knowledge_base":
                 print(f"   -> 🔍 触发检索, 参数: {tool_call['args']}")
-                tool_result_str = search_knowledge_base.invoke(tool_call["args"])
+                runnable_config = {"configurable": {"user_id": state.get("user_id")}}
+                tool_result_str = search_knowledge_base.invoke(tool_call["args"], config=runnable_config)
                 
                 try:
                     # 🚨 核心改造：将检索结果解析为数组，逐条压入记忆库

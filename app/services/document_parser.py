@@ -75,7 +75,7 @@ def merge_rects(rect_list, margin=15):
         rect_list = new_rects
     return rect_list
 
-def process_pdf_with_vlm(file_path: str, filename: str):
+def process_pdf_with_vlm(file_path: str, filename: str, user_id: str):
     """
     【架构解析：V5.0 高级入库流水线】
     阶段 1：使用递归滑动窗口进行文本切块 (Chunking & Overlap)
@@ -119,8 +119,8 @@ def process_pdf_with_vlm(file_path: str, filename: str):
                             # 为每个 500 字的切片生成高精度向量
                             vec = ollama.embeddings(model='bge-m3', prompt=chunk.page_content)['embedding']
                             cur.execute(
-                                "INSERT INTO it_support_kb (content, metadata, embedding) VALUES (%s, %s, %s)",
-                                (chunk.page_content, json.dumps(chunk.metadata), vec)
+                                "INSERT INTO it_support_kb (user_id, content, metadata, embedding) VALUES (%s, %s, %s, %s)",
+                                (user_id, chunk.page_content, json.dumps(chunk.metadata), vec)
                             )
                         conn.commit() # 提交文本事务
 
@@ -154,7 +154,7 @@ def process_pdf_with_vlm(file_path: str, filename: str):
                                 pix = page.get_pixmap(matrix=fitz.Matrix(300 / 72, 300 / 72), clip=chart_rect, alpha=False)
                                 image_bytes = pix.tobytes("png")
                                 
-                                object_key = f"knowledge_images/{filename}_p{page_num+1}_chart{idx+1}_{uuid.uuid4().hex[:8]}.png"
+                                object_key = f"knowledge_images/{user_id}/{filename}_p{page_num+1}_chart{idx+1}_{uuid.uuid4().hex[:8]}.png"
                                 storage.client.put_object(
                                     Bucket=settings.S3_BUCKET_NAME, Key=object_key, Body=image_bytes, ContentType='image/png'
                                 )
@@ -180,8 +180,8 @@ def process_pdf_with_vlm(file_path: str, filename: str):
                                 meta = {"source": filename, "page": page_num + 1, "type": "image", "url": cloud_url}
                                 
                                 cur.execute(
-                                    "INSERT INTO it_support_kb (content, metadata, embedding) VALUES (%s, %s, %s)",
-                                    (rich_content, json.dumps(meta), img_vec)
+                                    "INSERT INTO it_support_kb (user_id, content, metadata, embedding) VALUES (%s, %s, %s, %s)",
+                                    (user_id, rich_content, json.dumps(meta), img_vec)
                                 )
                             conn.commit()
                         except Exception as page_e:
@@ -199,7 +199,7 @@ def process_pdf_with_vlm(file_path: str, filename: str):
             print(f"🗑️ 已安全清理本地临时文件: {file_path}")
 
 # 🚨 2. 新增：Unstructured 工业级通用流水线
-def process_unstructured_pipeline(file_path: str, filename: str):
+def process_unstructured_pipeline(file_path: str, filename: str, user_id: str):
     print(f"\n🏭 [业务层] 启动 Unstructured 多模态流水线: {filename}")
     
     img_temp_dir = f"temp_uploads/images_{uuid.uuid4().hex[:8]}"
@@ -275,7 +275,7 @@ def process_unstructured_pipeline(file_path: str, filename: str):
                     with open(img_path, "rb") as f:
                         image_bytes = f.read()
                     
-                    object_key = f"knowledge_images/{filename}_unstructured_{uuid.uuid4().hex[:8]}.png"
+                    object_key = f"knowledge_images/{user_id}/{filename}_unstructured_{uuid.uuid4().hex[:8]}.png"
                     storage.client.put_object(
                         Bucket=settings.S3_BUCKET_NAME, Key=object_key, Body=image_bytes, ContentType='image/png'
                     )
@@ -321,8 +321,8 @@ def process_unstructured_pipeline(file_path: str, filename: str):
                 for chunk in final_chunks:
                     vec = ollama.embeddings(model='bge-m3', prompt=chunk.page_content)['embedding']
                     cur.execute(
-                        "INSERT INTO it_support_kb (content, metadata, embedding) VALUES (%s, %s, %s)",
-                        (chunk.page_content, json.dumps(chunk.metadata), vec)
+                        "INSERT INTO it_support_kb (user_id, content, metadata, embedding) VALUES (%s, %s, %s, %s)",
+                        (user_id, chunk.page_content, json.dumps(chunk.metadata), vec)
                     )
             conn.commit()
         
@@ -338,7 +338,7 @@ def process_unstructured_pipeline(file_path: str, filename: str):
             shutil.rmtree(img_temp_dir)
 
 # 🚨 3. 新增：全局调度器入口 (被 endpoints 调用)
-def process_and_ingest_document(file_path: str, filename: str):
+def process_and_ingest_document(file_path: str, filename: str, user_id: str):
     """
     【架构解析：调度器模式 (Dispatcher Pattern)】
     统一的入口点。根据文件扩展名动态分发到不同的解析引擎。
@@ -347,7 +347,7 @@ def process_and_ingest_document(file_path: str, filename: str):
     ext = filename.lower()
     if ext.endswith('.pdf'):
         # PDF 依然走拥有极致多模态理解能力的旧流水线
-        process_pdf_with_vlm(file_path, filename)
+        process_pdf_with_vlm(file_path, filename, user_id)
     else:
         # 其他办公格式 (Word, Excel, PPT) 走工业级 Unstructured 流水线
-        process_unstructured_pipeline(file_path, filename)
+        process_unstructured_pipeline(file_path, filename, user_id)

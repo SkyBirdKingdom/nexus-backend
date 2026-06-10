@@ -1,8 +1,9 @@
-from fastapi import APIRouter, UploadFile, File, BackgroundTasks, HTTPException
+from fastapi import APIRouter, UploadFile, File, BackgroundTasks, HTTPException, Depends
 from app.services.document_parser import process_and_ingest_document
 from app.schemas.responses import BaseResponse
 import os
 import shutil
+from app.core.security import get_current_user
 
 router = APIRouter()
 
@@ -11,7 +12,7 @@ UPLOAD_DIR = "temp_uploads"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 @router.post("/upload", response_model=BaseResponse)
-async def upload_document(background_tasks: BackgroundTasks, file: UploadFile = File(...)):
+async def upload_document(background_tasks: BackgroundTasks, file: UploadFile = File(...), current_user: dict = Depends(get_current_user)):
     """
     【架构解析：异步解耦上传接口】
     1. 接收前端传来的物理文件，并闪电般落盘到本地临时目录。
@@ -29,7 +30,7 @@ async def upload_document(background_tasks: BackgroundTasks, file: UploadFile = 
         shutil.copyfileobj(file.file, buffer)
         
     # 🚨 核心逻辑：丢给后台任务，立刻返回！
-    background_tasks.add_task(process_and_ingest_document, file_path, file.filename)
+    background_tasks.add_task(process_and_ingest_document, file_path, file.filename, current_user["user_id"])
     
     return BaseResponse(
         code=200, 

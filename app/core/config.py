@@ -29,6 +29,10 @@ class Settings(BaseSettings):
     # 大模型配置
     LLM_MODEL: str = "qwen2.5:32b"
     VLM_MODEL: str = "qwen2.5-vl"
+    
+    JWT_SECRET_KEY: str = "nexus_super_secret_enterprise_key_2026_default"
+    JWT_ALGORITHM: str = "HS256"
+    ACCESS_TOKEN_EXPIRE_DAYS: int = 7
 
     class Config:
         env_file = ".env" # 指定环境变量文件路径

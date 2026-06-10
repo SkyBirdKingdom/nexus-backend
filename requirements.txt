@@ -41,3 +41,9 @@ unstructured[all-docs]
 unstructured-inference
 layoutparser
 beautifulsoup4
+
+# ==========================================
+# 7. 身份认证与安全 (Auth & Security)
+# ==========================================
+PyJWT
+bcrypt
