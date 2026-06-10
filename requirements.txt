@@ -47,3 +47,9 @@ beautifulsoup4
 # ==========================================
 PyJWT
 bcrypt
+
+# ==========================================
+# 8. 分布式记忆引擎 (LangGraph Postgres)
+# ==========================================
+psycopg[binary,pool]
+langgraph-checkpoint-postgres

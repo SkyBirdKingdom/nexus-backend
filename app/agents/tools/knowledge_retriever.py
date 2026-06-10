@@ -89,7 +89,7 @@ def search_knowledge_base(query: str, config: RunnableConfig) -> str:
             highest_score = scored_results[0][0]
             
             if highest_score < CONFIDENCE_THRESHOLD:
-                return json.dumps([{"title": "系统拦截", "content": "知识库中绝对没有关于此问题的信息，请诚实拒绝。"}], ensure_ascii=False)
+                return "NOT_FOUND"
                 
             top_results = [res for res in scored_results[:6] if res[0] >= CONFIDENCE_THRESHOLD]
             

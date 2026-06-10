@@ -62,5 +62,15 @@ def init_db():
                     user_id VARCHAR(50) NOT NULL  -- 🚨 核心隔离字段
                 )
             """)
+
+            # 🚨 新增：企业级会话索引表 (为前端侧边栏提供极速响应)
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS chat_sessions (
+                    thread_id VARCHAR(100) PRIMARY KEY,
+                    user_id VARCHAR(50) NOT NULL,
+                    title VARCHAR(100) NOT NULL,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
         conn.commit()
     print("✅ [数据库] 引擎校验完毕！")
