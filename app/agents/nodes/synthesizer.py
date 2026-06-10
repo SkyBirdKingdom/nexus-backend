@@ -36,9 +36,18 @@ def synthesizer_node(state: AgentState):
         【🚨 核心输出规范（死命令）】：
         1. 【引用溯源】：必须使用标准 Markdown 脚注语法。例如句子末尾添加 `[^1]`。
         2. 【格式熔断】：回答正文后立即停止！绝对禁止在文末生成类似 "### 参考资料" 的附录。
-        3. 【图片绝对保真】：当你决定在回答中展示情报里的图片时，**必须且只能**使用 Markdown 的内联图片语法：`![图片说明](完整的http链接)`。
-           - 🚨 致命错误：大模型经常错误地将图片写成参考式链接 `![图片说明][1]`。这是绝对禁止的！
-           - 图片的 `http` 链接必须原封不动地输出，决不能将其替换为脚注序号！
+        3. 【图片绝对保真】：当你决定在回答中展示情报里的图片时，必须且只能使用 Markdown 内联语法：`![图片说明](完整的http链接)`。
+        
+        4. 【🚨 企业级表格与 Artifacts 隔离协议】：
+           如果【底层情报】中包含表格数据，你必须保留其完整的 HTML 结构（动态计算 rowspan 还原合并单元格）。
+           但是，你绝对不能将 HTML 直接暴露在正文中！你必须将其包裹在一个标记为 `html nexus-artifact` 的 Markdown 代码块中！
+           
+           正确输出格式示范：
+           ```html nexus-artifact
+           <div class='table-wrapper'>
+             <table class='nexus-table'>...</table>
+           </div>
+           ```
         """
         
     response = llm.invoke(prompt)

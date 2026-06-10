@@ -41,7 +41,7 @@ def search_knowledge_base(query: str) -> str:
                     SELECT content, metadata,
                            ROW_NUMBER() OVER (ORDER BY embedding <=> %s::vector) AS rank
                     FROM it_support_kb
-                    LIMIT 20
+                    LIMIT 30
                 ),
                 keyword_search AS (
                     -- 第二路：字面相似度检索 (利用 pg_trgm)
@@ -49,7 +49,7 @@ def search_knowledge_base(query: str) -> str:
                            ROW_NUMBER() OVER (ORDER BY similarity(content, %s) DESC) AS rank
                     FROM it_support_kb
                     WHERE content ILIKE %s OR similarity(content, %s) > 0.05
-                    LIMIT 20
+                    LIMIT 30
                 )
                 -- RRF 融合计算 (常数 k 通常取 60)
                 SELECT
@@ -59,7 +59,7 @@ def search_knowledge_base(query: str) -> str:
                 FROM vector_search v
                 FULL OUTER JOIN keyword_search k ON v.content = k.content
                 ORDER BY rrf_score DESC
-                LIMIT 15;
+                LIMIT 20;
                 """
                 
                 # ILIKE 用于绝对字面包含，similarity 用于近似拼写

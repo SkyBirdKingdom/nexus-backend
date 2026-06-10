@@ -40,3 +40,4 @@ markitdown
 unstructured[all-docs]
 unstructured-inference
 layoutparser
+beautifulsoup4

@@ -17,6 +17,38 @@ from langchain_core.documents import Document
 from unstructured.partition.auto import partition
 from unstructured.cleaners.core import clean_extra_whitespace
 
+from bs4 import BeautifulSoup
+
+
+# 🚨 新增：降维转换器 (HTML -> Markdown)
+def html_table_to_markdown(html_string: str) -> str:
+    """
+    将带有繁重标签的 HTML 表格转换为极简的 Markdown 矩阵。
+    彻底消灭检索时的字面量稀释惩罚。
+    """
+    if not html_string:
+        return ""
+    
+    soup = BeautifulSoup(html_string, 'html.parser')
+    rows = soup.find_all('tr')
+    if not rows:
+        return ""
+        
+    md_lines = []
+    for i, row in enumerate(rows):
+        # 提取表头(th)或单元格(td)
+        cols = row.find_all(['th', 'td'])
+        # 清理多余换行和空格，防止破坏 Markdown 结构
+        col_texts = [clean_extra_whitespace(col.get_text()).replace('|', '-') for col in cols]
+        
+        md_lines.append("| " + " | ".join(col_texts) + " |")
+        
+        # 在第一行（表头）下方自动补全 Markdown 的分割线
+        if i == 0:
+            md_lines.append("|" + "|".join(["---"] * len(cols)) + "|")
+            
+    return "\n".join(md_lines)
+
 def merge_rects(rect_list, margin=15):
     """
     将距离接近的元素框合并成一个完整的大图表框。
@@ -214,23 +246,25 @@ def process_unstructured_pipeline(file_path: str, filename: str):
                 flush_text_buffer(page_num)
                 html_table = getattr(element.metadata, "text_as_html", element.text)
 
-                # 提取 Unstructured 原生提供的无标签纯文本，用于无损搜索
-                clean_table_text = clean_extra_whitespace(element.text)
                 context_str = " ".join(context_window) if context_window else "文档正文"
                 
-                # 🚨 1. 搜索面：干净清爽，没有一个 HTML 标签，保证 pg_trgm 和 bge-m3 打分爆表！
-                searchable_text = f"【表格关联上下文：{context_str}】\n表格内数据摘要：{clean_table_text}"
+                # 🚨 核心改造 1：将繁重的 HTML 转换为轻量的 Markdown 矩阵
+                markdown_table = html_table_to_markdown(html_table)
                 
-                # 🚨 2. 展示面：原汁原味的 HTML 表格，隐藏起来
+                # 🚨 核心改造 2：搜索面 (content) 使用纯净的 Markdown 格式
+                # 向量模型对 Markdown 语法的行列对齐极为敏感，得分将暴涨！
+                searchable_text = f"【表格关联上下文：{context_str}】\n{markdown_table}"
+                
+                # 🚨 核心改造 3：展示面 (metadata) 依然保留原汁原味的 HTML
                 display_html = f"【表格关联上下文：{context_str}】\n<div class='table-wrapper'>\n{html_table}\n</div>\n"
                 
                 final_chunks.append(Document(
-                    page_content=searchable_text, # 存入 content 字段，专供检索
+                    page_content=searchable_text, 
                     metadata={
                         "source": filename,
                         "type": "unstructured_table",
                         "page": page_num,
-                        "original_html": display_html # 悄悄塞进 metadata
+                        "original_html": display_html # 被藏在这里，待检索器狸猫换太子
                     }
                 ))
                 
