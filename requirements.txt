@@ -53,3 +53,8 @@ bcrypt
 # ==========================================
 psycopg[binary,pool]
 langgraph-checkpoint-postgres
+
+# ==========================================
+# 9. 企业级凭证保险库 (Symmetric Encryption)
+# ==========================================
+cryptography

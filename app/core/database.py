@@ -72,5 +72,18 @@ def init_db():
                     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             """)
+
+            # 🚨 新增：外部凭证保险库 (Credential Vault)
+            # 使用 UNIQUE(user_id, platform) 确保每个用户每个平台只能绑一个 Token
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS user_credentials (
+                    id SERIAL PRIMARY KEY,
+                    user_id VARCHAR(50) NOT NULL,
+                    platform VARCHAR(50) NOT NULL,
+                    encrypted_token TEXT NOT NULL,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(user_id, platform)
+                )
+            """)
         conn.commit()
     print("✅ [数据库] 引擎校验完毕！")

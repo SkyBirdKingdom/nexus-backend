@@ -30,9 +30,11 @@ class Settings(BaseSettings):
     LLM_MODEL: str = "qwen2.5:32b"
     VLM_MODEL: str = "qwen2.5-vl"
     
-    JWT_SECRET_KEY: str = "nexus_super_secret_enterprise_key_2026_default"
+    JWT_SECRET_KEY: str = "your_jwt_secret_key"
     JWT_ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_DAYS: int = 7
+
+    VAULT_SECRET_KEY: str = "your_vault_secret_key"
 
     class Config:
         env_file = ".env" # 指定环境变量文件路径

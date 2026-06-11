@@ -6,9 +6,13 @@ from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
 from app.core.config import settings
 from app.core.database import get_db_connection
+from cryptography.fernet import Fernet
 
 # 告诉 FastAPI，登录接口的路由在哪里
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login")
+
+# 🚨 新增：初始化对称加密引擎
+fernet_cipher = Fernet(settings.VAULT_SECRET_KEY.encode())
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
     """
@@ -58,3 +62,11 @@ def get_current_user(token: str = Depends(oauth2_scheme)):
         return {"user_id": user[0], "username": user[1]}
     except jwt.PyJWTError:
         raise credentials_exception
+
+def encrypt_token(plain_token: str) -> str:
+    """将外部系统明文 Token 加密为安全密文"""
+    return fernet_cipher.encrypt(plain_token.encode()).decode()
+
+def decrypt_token(encrypted_token: str) -> str:
+    """Agent 取用时，将密文解密为明文 Token"""
+    return fernet_cipher.decrypt(encrypted_token.encode()).decode()

@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.core.config import settings
-from app.api.endpoints import chat, documents, auth # 🚨 引入 auth
+from app.api.endpoints import chat, documents, auth, credentials # 🚨 引入 auth
 from app.core.database import init_db             # 🚨 引入 db init
 
 # 启动时初始化表结构
@@ -18,6 +18,7 @@ app = FastAPI(
 app.include_router(auth.router, prefix="/api/v1/auth", tags=["Auth"])
 app.include_router(chat.router, prefix="/api/v1", tags=["Conversation"])
 app.include_router(documents.router, prefix="/api/v1/documents", tags=["Knowledge Base"])
+app.include_router(credentials.router, prefix="/api/v1/credentials", tags=["Federated Vault"]) # 🚨 挂载路由
 
 # 配置跨域
 app.add_middleware(
